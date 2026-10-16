@@ -213,7 +213,7 @@
     <p class="msg" id="boardMsg">Laddar topplistan…</p>
   </section>
 
-  <p class="help">Granar kan du inte hoppa över, de måste kapas när de är nära skördarhuvudet. Stenar kan inte kapas, de måste hoppas över. Varje kapad gran ger 25 poäng, och farten ökar ju längre du kör.</p>
+  <p class="help">Granar kan du inte hoppa över, de måste kapas när de är nära skördarhuvudet. Stenar kan inte kapas, de måste hoppas över. Varje kapad gran ger 25 poäng, och farten ökar ju längre du kör. Vid 2 000 poäng dyker skogstrollet upp och kastar stockar: rullar stocken längs marken måste du hoppa, flyger den högt ska du stanna kvar på marken.</p>
 </main>
 
 <script>
@@ -288,6 +288,46 @@
   ];
   const LOGS = ["LoooooL", ".LoooooL", "LoooooL"];
   const STUMP = ["LLL", "ttt"];
+
+  // Skogstrollet (vänt åt vänster)
+  const TROLL = [
+    ".....hhhhhh.....",
+    "...hhhhhhhhhh...",
+    "..hhsssssssshh..",
+    "..hsepsssepssh..",
+    ".nnssssssssssd..",
+    "nnnnssssssssdd..",
+    ".nnsmmmmmsssdd..",
+    "..bbbbbbbbbbbd..",
+    "..bbbbbbbbbbbd..",
+    "...bbbbbbbbbd...",
+    "..sssbbbbbsssd..",
+    ".ssssssssssssdd.",
+    ".ssssssssssssdd.",
+    ".cccccccccccccc.",
+    ".cccLcccccLcccc.",
+    "..cccccccccccc..",
+  ];
+  const LEGS_A = ["..ss......ss....", "..ss......ss....", ".fff.....fff...."];
+  const LEGS_B = ["...ss....ss.....", "...ss....ss.....", "..fff...fff....."];
+  const TCOL = { h: "#4b5a35", s: "#8a9a6b", d: "#64744c", e: "#f4f1e1", p: "#1d1d1d", n: "#9aab7a", m: "#3a2a1a",
+                 b: "#5c4a32", c: "#7a5232", L: "#a0723f", f: "#3f3222" };
+  function trollSpr(rows, x, y, s) {
+    for (let r = 0; r < rows.length; r++) for (let i = 0; i < rows[r].length; i++) {
+      const ch = rows[r][i];
+      if (ch === ".") continue;
+      ctx.fillStyle = TCOL[ch];
+      ctx.fillRect(Math.round(x + i * s), Math.round(y + r * s), s, s);
+    }
+  }
+  function drawThrownLog(x, yy, rot) {
+    ctx.save(); ctx.translate(Math.round(x), Math.round(yy)); ctx.rotate(rot);
+    ctx.fillStyle = "#7a5232"; ctx.fillRect(-16, -6, 32, 12);
+    ctx.fillStyle = "#9a6a3e"; ctx.fillRect(-16, -6, 32, 3);
+    ctx.fillStyle = "#e2c08f"; ctx.fillRect(-18, -6, 4, 12); ctx.fillRect(14, -6, 4, 12);
+    ctx.fillStyle = "#b07a45"; ctx.fillRect(-17, -1, 2, 2); ctx.fillRect(15, -1, 2, 2);
+    ctx.restore();
+  }
 
   function colorOf(ch, m) {
     if (ch === "b") return m.b;
@@ -389,16 +429,19 @@
   let state = "ready";
   let speed, dist, trees, y, vy, onGround, cutT, cutCool, spawnIn, overT, nextMilestone, flash, newBest;
   let obstacles, fallen, chips, popups, scroll = 0;
+  let bonus, boss, thrown, nextBoss, bossRound, banner;
 
+  const BOSS_AT = 2000;
   function reset() {
     speed = 270; dist = 0; trees = 0;
     y = 0; vy = 0; onGround = true;
     cutT = 0; cutCool = 0;
     spawnIn = 420; overT = 0; nextMilestone = 100; flash = 0; newBest = false;
     obstacles = []; fallen = []; chips = []; popups = [];
+    bonus = 0; boss = null; thrown = []; nextBoss = BOSS_AT; bossRound = 0; banner = null;
   }
   reset();
-  const score = () => Math.floor(dist / 10) + trees * 25;
+  const score = () => Math.floor(dist / 10) + trees * 25 + bonus;
 
   function start() {
     hideSubmit();
@@ -446,7 +489,7 @@
       target.cut = true;
       fallen.push({ x: target.x, s: target.s, a: 0, t: 0 });
       trees++;
-      popups.push({ x: target.x, y: GROUND - target.s * 13 - 8, t: 0.8 });
+      popups.push({ x: target.x, y: GROUND - target.s * 13 - 8, t: 0.8, txt: "+25" });
       for (let i = 0; i < 12; i++) {
         chips.push({ x: target.x, y: GROUND - 12, vx: Math.random() * 180 - 40, vy: -Math.random() * 240 - 60, t: 0.6 });
       }
@@ -468,6 +511,102 @@
     spawnIn = speed * (0.85 + Math.random() * 0.9) + 140;
   }
 
+  // ---------- Skogstrollet ----------
+  const TROLL_X = W - 130, TS = 4;
+  function startBoss() {
+    bossRound++;
+    const r = bossRound;
+    boss = {
+      phase: "wait", x: W + 40, t: 0, round: r,
+      total: Math.min(14, 6 + 2 * r), thrown: 0, passed: 0,
+      windup: Math.max(0.42, 0.8 - 0.14 * (r - 1)),
+      gap: Math.max(0.55, 1.05 - 0.18 * (r - 1)),
+      pose: "idle", poseT: 0, next: null, queue: [],
+    };
+  }
+  function bossThrow(type) {
+    const hx = boss.x + (type === "high" ? 10 : -6);
+    if (type === "high") thrown.push({ type, x: hx, y: GROUND - 118, sx: hx, rot: 0, vx: -(speed + 100) });
+    else thrown.push({ type, x: hx, y: GROUND - 9, sx: hx, rot: 0, vx: -(speed + 70) });
+    boss.thrown++;
+    boss.pose = "throw"; boss.poseT = 0.22;
+    beep(type === "high" ? 300 : 180, 0.16, "triangle", 0.05, type === "high" ? 200 : -60);
+  }
+  function planThrow() {
+    // första gången: varannan hög och låg så att man lär sig, sedan slump
+    let type;
+    if (boss.round === 1 && boss.thrown < 4) type = boss.thrown % 2 ? "high" : "low";
+    else type = Math.random() < 0.5 ? "high" : "low";
+    boss.next = { type, t: boss.windup };
+    boss.pose = type === "high" ? "windHigh" : "windLow";
+    // från runda 2 kommer ibland två kast tätt efter varandra
+    if (boss.round >= 2 && Math.random() < 0.3 && boss.thrown + 2 <= boss.total) boss.queue.push(type === "high" ? "low" : "high");
+  }
+  function updateBoss(dt) {
+    const B = boss;
+    B.t += dt;
+    if (B.poseT > 0) { B.poseT -= dt; if (B.poseT <= 0 && B.pose === "throw") B.pose = "idle"; }
+
+    if (B.phase === "wait") {
+      // vänta tills vanliga hinder har passerat
+      if (!obstacles.some(o => o.x > HX - 20 && !(o.kind === "tree" && o.cut))) {
+        B.phase = "enter"; B.t = 0;
+        banner = { txt: "Ett skogstroll!", t: 2.2 };
+        beep(110, 0.5, "sawtooth", 0.05, -40);
+      }
+    } else if (B.phase === "enter") {
+      B.x += (TROLL_X - B.x) * Math.min(1, dt * 2.5);
+      if (B.t > 1.6) { B.phase = "fight"; B.t = 0; B.wait = 0.4; }
+    } else if (B.phase === "fight") {
+      if (B.next) {
+        B.next.t -= dt;
+        if (B.next.t <= 0) {
+          bossThrow(B.next.type);
+          if (B.queue.length) { const q = B.queue.shift(); B.next = { type: q, t: 0.42 }; B.pose = q === "high" ? "windHigh" : "windLow"; B.poseT = 0; }
+          else { B.next = null; B.wait = B.gap; }
+        }
+      } else if (B.thrown < B.total) {
+        B.wait -= dt;
+        if (B.wait <= 0) planThrow();
+      } else if (thrown.length === 0) {
+        B.phase = "leave"; B.t = 0;
+        const won = 500 * B.round;
+        bonus += won;
+        banner = { txt: `Trollet gav upp! +${won}`, t: 2.4 };
+        popups.push({ x: B.x + 30, y: GROUND - 100, t: 1.4, txt: `+${won}` });
+        beep(784, 0.1); setTimeout(() => beep(988, 0.1), 110); setTimeout(() => beep(1318, 0.18), 230);
+      }
+    } else if (B.phase === "leave") {
+      B.x += 160 * dt;
+      if (B.x > W + 80) {
+        boss = null;
+        nextBoss = Math.max(BOSS_AT * (bossRound + 1), score() + 1200);
+        spawnIn = 380;
+      }
+    }
+
+    // kastade stockar
+    const by = GROUND - 39 + y;
+    for (const t of thrown) {
+      t.x += t.vx * dt;
+      if (t.type === "high") {
+        const prog = Math.min(1, (t.sx - t.x) / Math.max(1, t.sx - HX - 40));
+        t.y = GROUND - 118 + (118 - 76) * Math.sin(prog * Math.PI / 2);
+        t.rot -= dt * 9;
+      } else {
+        t.rot -= dt * 14;
+      }
+      // krock: skördaren som rektangel, stocken som cirkel
+      const rx0 = HX + 2, rx1 = HX + 82, ry0 = by - 11, ry1 = by + 39;
+      const cx = Math.max(rx0, Math.min(t.x, rx1)), cy = Math.max(ry0, Math.min(t.y, ry1));
+      if ((t.x - cx) ** 2 + (t.y - cy) ** 2 < 9 * 9) { crash(); return true; }
+    }
+    const before = thrown.length;
+    thrown = thrown.filter(t => t.x > -40);
+    if (thrown.length < before && boss) boss.passed += before - thrown.length;
+    return false;
+  }
+
   function update(dt) {
     if (flash > 0) flash -= dt;
     if (state === "over") {
@@ -482,7 +621,7 @@
     }
     if (state !== "run") { scroll += 40 * dt; return; }
 
-    speed = Math.min(700, speed + 7 * dt);
+    if (!boss) speed = Math.min(700, speed + 7 * dt);
     const dx = speed * dt;
     dist += dx; scroll += dx;
 
@@ -493,8 +632,10 @@
     if (cutT > 0) cutT -= dt;
     if (cutCool > 0) cutCool -= dt;
 
-    spawnIn -= dx;
-    if (spawnIn <= 0) spawn();
+    if (!boss && score() >= nextBoss) startBoss();
+    if (!boss) { spawnIn -= dx; if (spawnIn <= 0) spawn(); }
+    if (banner) { banner.t -= dt; if (banner.t <= 0) banner = null; }
+    if (boss && updateBoss(dt)) return;
     for (const o of obstacles) o.x -= dx;
     obstacles = obstacles.filter(o => o.x > -80);
     for (const f of fallen) { f.x -= dx; f.t += dt; f.a = Math.min(Math.PI / 2, f.t * 5); }
@@ -633,12 +774,39 @@
   }
   const pad = n => String(n).padStart(5, "0");
 
+  function drawTroll() {
+    if (!boss) return;
+    const B = boss, s = TS;
+    const walk = Math.floor(performance.now() / 180) % 2;
+    const bob = walk ? 0 : s;
+    const tx = Math.round(B.x), ty = GROUND - (TROLL.length + 3) * s + bob;
+    trollSpr(walk ? LEGS_A : LEGS_B, tx, ty + TROLL.length * s - bob, s);
+    trollSpr(TROLL, tx, ty, s);
+    // armar och stock beroende på kastet trollet förbereder
+    ctx.fillStyle = TCOL.s;
+    const sh = { x: tx + 2 * s, y: ty + 11 * s };
+    let hand, log = null;
+    if (B.pose === "windHigh") { hand = { x: tx + 3 * s, y: ty - 2 * s }; log = { x: tx + 6 * s, y: ty - 4 * s, r: 0 }; }
+    else if (B.pose === "windLow") { hand = { x: tx + 1 * s, y: ty + 17 * s }; log = { x: tx + 3 * s, y: GROUND - 9, r: 0 }; }
+    else if (B.pose === "throw") hand = { x: tx - 3 * s, y: ty + 9 * s };
+    else hand = { x: tx + 1 * s, y: ty + 15 * s };
+    pixLine(ctx, sh.x, sh.y, hand.x, hand.y, s, TCOL.s);
+    pixLine(ctx, sh.x + 9 * s, sh.y, hand.x + 7 * s, hand.y + s, s, TCOL.d);
+    if (log) drawThrownLog(log.x, log.y, log.r);
+    // varningstecken och tips under första striden
+    if (B.next) {
+      const high = B.next.type === "high";
+      text("!", tx + 8 * s, ty - (high ? 13 : 7) * s, 18, "center");
+    }
+  }
+
   function draw() {
     ctx.imageSmoothingEnabled = false;
     drawSky();
     drawHills();
     drawGround();
     drawObstacles();
+    drawTroll();
     if (state !== "ready") {
       const t = cutT > 0 ? Math.sin((1 - cutT / 0.28) * Math.PI) : 0;
       const smoke = state === "run" && Math.floor(performance.now() / 140) % 3 === 0;
@@ -646,7 +814,13 @@
         state === "run" && Math.floor(dist / 20) % 2 === 1, cutT > 0, smoke);
       text(`Träd ${trees}`, 16, 14, 14);
       text(`Rekord ${pad(best)}   Poäng ${pad(score())}`, W - 16, 14, 14, "right");
-      for (const p of popups) text("+25", p.x, p.y, 12, "center");
+      for (const t of thrown) drawThrownLog(t.x, t.y, t.rot);
+      if (boss && (boss.phase === "fight" || boss.phase === "enter")) {
+        const left = boss.total - boss.thrown + (boss.next ? 0 : 0);
+        text(`Trollet: ${left} kast kvar`, W / 2, 36, 12, "center");
+      }
+      if (banner) text(banner.txt, W / 2, 62, 20, "center");
+      for (const p of popups) text(p.txt || "+25", p.x, p.y, 12, "center");
     }
     if (flash > 0) {
       ctx.fillStyle = "rgba(255,255,255,0.35)";
