@@ -138,6 +138,29 @@
   .controls small { display: block; font-size: 0.65rem; opacity: 0.6; margin-top: 0.2rem; }
   @media (hover: none) { .controls small { display: none; } }
   .help { margin-top: 1.4rem; font-size: 0.75rem; line-height: 1.8; opacity: 0.7; max-width: 64ch; }
+  .board { margin-top: 1.6rem; border: 3px solid var(--ink); background: var(--surface); padding: 1rem 1.1rem 1.1rem; }
+  .board[hidden] { display: none; }
+  .board h2 { font-weight: 400; font-size: 1.4rem; margin: 0 0 0.6rem; }
+  .board ol { list-style: none; margin: 0; padding: 0; counter-reset: rank; }
+  .board li { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 0.6rem; align-items: center; padding: 0.45rem 0; border-top: 2px dashed var(--line); font-size: 0.9rem; counter-increment: rank; }
+  .board li::before { content: counter(rank) "."; opacity: 0.6; }
+  .board li:first-child { border-top: 0; }
+  .board li.me { background: color-mix(in srgb, var(--machine) 14%, transparent); }
+  .board .who { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .board .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board .dot { width: 10px; height: 10px; flex: none; border: 2px solid var(--ink); }
+  .board .pts { font-variant-numeric: tabular-nums; }
+  .board .msg { font-size: 0.8rem; opacity: 0.75; margin: 0.5rem 0 0; line-height: 1.6; }
+  .submit { border: 3px solid var(--machine); padding: 0.8rem; margin-bottom: 1rem; }
+  .submit[hidden] { display: none; }
+  .submit p { margin: 0 0 0.6rem; font-size: 0.85rem; line-height: 1.6; }
+  .submit-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .submit input {
+    font: inherit; font-size: 1rem; color: var(--ink); background: var(--bg);
+    border: 3px solid var(--ink); padding: 0.55rem 0.7rem; flex: 1 1 12rem; min-width: 0;
+  }
+  .submit input:focus-visible { outline: 3px dashed var(--ink); outline-offset: 2px; }
+  .submit button { font-size: 0.95rem; padding: 0.55rem 1.1rem; box-shadow: 4px 4px 0 var(--machine); }
 </style>
 </head>
 <body>
@@ -176,11 +199,33 @@
     <button id="btnCut" type="button">Kapa<small>→ eller X</small></button>
   </div>
 
+  <section class="board" id="board" hidden aria-live="polite">
+    <h2>Topplista</h2>
+    <div class="submit" id="submitBox" hidden>
+      <p>Du fick <strong id="subScore">0</strong> poäng. Skriv ett smeknamn för att komma med på listan (inte ditt riktiga namn).</p>
+      <div class="submit-row">
+        <input id="nick" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Smeknamn" aria-label="Smeknamn">
+        <button type="button" id="btnSubmit">Spara</button>
+      </div>
+      <p class="msg" id="subMsg"></p>
+    </div>
+    <ol id="boardList"></ol>
+    <p class="msg" id="boardMsg">Laddar topplistan…</p>
+  </section>
+
   <p class="help">Granar kan du inte hoppa över, de måste kapas när de är nära skördarhuvudet. Stenar kan inte kapas, de måste hoppas över. Varje kapad gran ger 25 poäng, och farten ökar ju längre du kör.</p>
 </main>
 
 <script>
 (() => {
+  // ---------- Topplista (Supabase) ----------
+  // Fyll i projektets adress och publika nyckel från Supabase (Project Settings → API).
+  // Den publika nyckeln får ligga synligt i koden. Lämna tomt för att stänga av topplistan.
+  const LEADERBOARD = {
+    url: "https://fybvgvcegsclqdngmyva.supabase.co",
+    key: "sb_publishable_Jz7pdEFIioyydN53kThjDA_tjzd5jM_",
+  };
+
   const cv = document.getElementById("c");
   const ctx = cv.getContext("2d");
   const W = 720, H = 240, GROUND = 196, S = 3, HX = 60;
@@ -356,6 +401,7 @@
   const score = () => Math.floor(dist / 10) + trees * 25;
 
   function start() {
+    hideSubmit();
     reset();
     state = "run";
     startScreen.hidden = true;
@@ -374,6 +420,7 @@
     state = "over"; overT = 0; flash = 0.15;
     const sc = score();
     if (sc > best) { best = sc; newBest = true; saveBest(); }
+    offerSubmit(sc);
     beep(160, 0.35, "square", 0.06, -100);
   }
 
@@ -427,6 +474,7 @@
       overT += dt;
       if (overT > 0.5 && overScreen.hidden) {
         overText.textContent = newBest ? `Nytt rekord: ${score()} poäng!` : `${score()} poäng, ${trees} träd kapade`;
+        if (!submitBox.hidden) overText.textContent += " Spara poängen i topplistan nedanför.";
         overScreen.hidden = false;
         document.getElementById("btnAgain").focus({ preventScroll: true });
       }
@@ -616,7 +664,98 @@
   }
 
   // ---------- Kontroller ----------
+  // ---------- Topplista ----------
+  const lbUrl = LEADERBOARD.url.trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+  const lbOn = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(lbUrl) && LEADERBOARD.key.trim().length > 20;
+  const board = document.getElementById("board");
+  const boardList = document.getElementById("boardList");
+  const boardMsg = document.getElementById("boardMsg");
+  const submitBox = document.getElementById("submitBox");
+  const nickEl = document.getElementById("nick");
+  const subMsg = document.getElementById("subMsg");
+  const btnSubmit = document.getElementById("btnSubmit");
+  let pendingScore = null, myRowId = null;
+  const BLOCKED = ["fitta", "kuk", "hora", "jävla", "javla", "neger", "bög", "fuck", "shit", "bitch", "cunt", "nigg", "nazi", "hitler", "porr", "porn", "dick", "pussy"];
+  try { nickEl.value = localStorage.getItem("skordaren-nick") || ""; } catch (e) {}
+
+  function lbHeaders(extra) { return Object.assign({ apikey: LEADERBOARD.key.trim(), "Content-Type": "application/json" }, extra || {}); }
+
+  async function loadBoard() {
+    if (!lbOn) return;
+    try {
+      const r = await fetch(`${lbUrl}/rest/v1/scores?select=id,name,score,trees,machine&order=score.desc,created_at.asc&limit=10`, { headers: lbHeaders() });
+      if (!r.ok) throw new Error(r.status);
+      const rows = await r.json();
+      boardList.innerHTML = "";
+      for (const row of rows) {
+        const li = document.createElement("li");
+        if (row.id === myRowId) li.className = "me";
+        const who = document.createElement("div"); who.className = "who";
+        const dot = document.createElement("i"); dot.className = "dot";
+        dot.style.background = row.machine === "deere" ? "#3b7d34" : "#c8322b";
+        const name = document.createElement("span"); name.textContent = row.name;
+        who.append(dot, name);
+        const pts = document.createElement("span"); pts.className = "pts";
+        pts.textContent = `${row.score} p · ${row.trees} träd`;
+        li.append(who, pts);
+        boardList.appendChild(li);
+      }
+      boardMsg.textContent = rows.length ? "" : "Ingen har kommit med på listan än. Bli först!";
+    } catch (e) {
+      boardMsg.textContent = "Topplistan kunde inte laddas just nu.";
+    }
+  }
+
+  function offerSubmit(sc) {
+    if (!lbOn || sc <= 0) return;
+    pendingScore = { score: sc, trees, machine };
+    document.getElementById("subScore").textContent = sc;
+    subMsg.textContent = "";
+    btnSubmit.disabled = false;
+    submitBox.hidden = false;
+  }
+  function hideSubmit() { submitBox.hidden = true; pendingScore = null; }
+
+  function checkName(n) {
+    if (n.length < 2 || n.length > 16) return "Smeknamnet ska vara 2–16 tecken.";
+    if (!/^[\p{L}\p{N} _.-]+$/u.test(n)) return "Använd bara bokstäver, siffror, mellanslag, punkt och bindestreck.";
+    const low = n.toLowerCase().replace(/[^\p{L}]/gu, "");
+    if (BLOCKED.some(w => low.includes(w))) return "Välj ett annat smeknamn.";
+    return "";
+  }
+
+  async function submitScore() {
+    if (!pendingScore) return;
+    const name = nickEl.value.trim().replace(/\s+/g, " ");
+    const err = checkName(name);
+    if (err) { subMsg.textContent = err; return; }
+    btnSubmit.disabled = true;
+    subMsg.textContent = "Sparar…";
+    try {
+      const r = await fetch(`${lbUrl}/rest/v1/scores?select=id`, {
+        method: "POST",
+        headers: lbHeaders({ Prefer: "return=representation" }),
+        body: JSON.stringify({ name, score: pendingScore.score, trees: pendingScore.trees, machine: pendingScore.machine }),
+      });
+      if (!r.ok) throw new Error(r.status);
+      const out = await r.json().catch(() => []);
+      myRowId = out && out[0] ? out[0].id : null;
+      try { localStorage.setItem("skordaren-nick", name); } catch (e) {}
+      pendingScore = null;
+      subMsg.textContent = "Sparat!";
+      setTimeout(() => { submitBox.hidden = true; }, 1200);
+      loadBoard();
+    } catch (e) {
+      btnSubmit.disabled = false;
+      subMsg.textContent = "Det gick inte att spara. Försök igen om en stund.";
+    }
+  }
+  btnSubmit.addEventListener("click", submitScore);
+  nickEl.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submitScore(); } });
+  if (lbOn) { board.hidden = false; loadBoard(); }
+
   addEventListener("keydown", e => {
+    if (e.target && e.target.tagName === "INPUT") return;
     if (e.repeat) return;
     const k = e.key;
     const onButton = e.target && e.target.tagName === "BUTTON";
