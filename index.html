@@ -213,7 +213,7 @@
     <p class="msg" id="boardMsg">Laddar topplistan…</p>
   </section>
 
-  <p class="help">Granar kan du inte hoppa över, de måste kapas när de är nära skördarhuvudet. Stenar kan inte kapas, de måste hoppas över. Varje kapad gran ger 25 poäng, och farten ökar ju längre du kör. Vid 2 000 poäng dyker skogstrollet upp och kastar stockar: rullar stocken längs marken måste du hoppa, flyger den högt ska du stanna kvar på marken.</p>
+  <p class="help">Granar kan du inte hoppa över, de måste kapas när de är nära skördarhuvudet. Stenar kan inte kapas, de måste hoppas över. Varje kapad gran ger 25 poäng, och farten ökar ju längre du kör. Efter vart 15:e kapade träd dyker skogstrollet upp och kastar stockar: rullar stocken längs marken måste du hoppa, flyger den högt ska du stanna kvar på marken.</p>
 </main>
 
 <script>
@@ -431,14 +431,14 @@
   let obstacles, fallen, chips, popups, scroll = 0;
   let bonus, boss, thrown, nextBoss, bossRound, banner;
 
-  const BOSS_AT = 2000;
+  const BOSS_TREES = 15;
   function reset() {
     speed = 270; dist = 0; trees = 0;
     y = 0; vy = 0; onGround = true;
     cutT = 0; cutCool = 0;
     spawnIn = 420; overT = 0; nextMilestone = 100; flash = 0; newBest = false;
     obstacles = []; fallen = []; chips = []; popups = [];
-    bonus = 0; boss = null; thrown = []; nextBoss = BOSS_AT; bossRound = 0; banner = null;
+    bonus = 0; boss = null; thrown = []; nextBoss = BOSS_TREES; bossRound = 0; banner = null;
   }
   reset();
   const score = () => Math.floor(dist / 10) + trees * 25 + bonus;
@@ -580,7 +580,7 @@
       B.x += 160 * dt;
       if (B.x > W + 80) {
         boss = null;
-        nextBoss = Math.max(BOSS_AT * (bossRound + 1), score() + 1200);
+        nextBoss = trees + BOSS_TREES;
         spawnIn = 380;
       }
     }
@@ -632,7 +632,7 @@
     if (cutT > 0) cutT -= dt;
     if (cutCool > 0) cutCool -= dt;
 
-    if (!boss && score() >= nextBoss) startBoss();
+    if (!boss && trees >= nextBoss) startBoss();
     if (!boss) { spawnIn -= dx; if (spawnIn <= 0) spawn(); }
     if (banner) { banner.t -= dt; if (banner.t <= 0) banner = null; }
     if (boss && updateBoss(dt)) return;
@@ -812,7 +812,7 @@
       const smoke = state === "run" && Math.floor(performance.now() / 140) % 3 === 0;
       drawMachine(ctx, HX, GROUND - 39 + y, MACHINES[machine], t,
         state === "run" && Math.floor(dist / 20) % 2 === 1, cutT > 0, smoke);
-      text(`Träd ${trees}`, 16, 14, 14);
+      text(boss ? `Träd ${trees}` : `Träd ${trees}/${nextBoss}`, 16, 14, 14);
       text(`Rekord ${pad(best)}   Poäng ${pad(score())}`, W - 16, 14, 14, "right");
       for (const t of thrown) drawThrownLog(t.x, t.y, t.rot);
       if (boss && (boss.phase === "fight" || boss.phase === "enter")) {
